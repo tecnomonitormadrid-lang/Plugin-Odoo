@@ -1,0 +1,94 @@
+name: odoo-layer-dev
+
+services:
+  db:
+    image: postgres:15
+    container_name: odoo_dev_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - backend
+
+  odoo:
+    image: ${ODOO_IMAGE:-odoo:19.0}
+    container_name: odoo_dev_app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${ODOO_HTTP_PORT}:8069"
+      - "${ODOO_LONGPOLLING_PORT}:8072"
+    environment:
+      HOST: db
+      PORT: 5432
+      USER: ${POSTGRES_USER}
+      PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - odoo-web-data:/var/lib/odoo
+      - ./addons:/mnt/extra-addons
+      - ./config:/etc/odoo
+    networks:
+      - backend
+
+  connector-api:
+    build:
+      context: ./connector-api
+      dockerfile: Dockerfile
+    container_name: tpv_connector_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      odoo:
+        condition: service_started
+    ports:
+      - "${CONNECTOR_API_PORT}:8081"
+    environment:
+      APP_ENV: ${APP_ENV}
+      DATABASE_URL: ${CONNECTOR_DATABASE_URL}
+      ODOO_BASE_URL: ${ODOO_BASE_URL}
+      ODOO_PUSH_PATH: ${ODOO_PUSH_PATH}
+      SYNC_BATCH_SIZE: ${SYNC_BATCH_SIZE}
+      SYNC_TIMEOUT_SECONDS: ${SYNC_TIMEOUT_SECONDS}
+      SYNC_MAX_RETRIES: ${SYNC_MAX_RETRIES}
+      SYNC_BACKOFF_BASE_SECONDS: ${SYNC_BACKOFF_BASE_SECONDS}
+      SYNC_BACKOFF_MAX_SECONDS: ${SYNC_BACKOFF_MAX_SECONDS}
+      ODOO_DB: ${POSTGRES_DB}
+      ODOO_USER: ${ODOO_USER}
+      ODOO_PASSWORD: ${ODOO_PASSWORD}
+    networks:
+      - backend
+
+  adminer:
+    image: adminer:4
+    container_name: odoo_dev_adminer
+    restart: unless-stopped
+    profiles:
+      - tools
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${ADMINER_PORT}:8080"
+    networks:
+      - backend
+
+volumes:
+  postgres-data:
+  odoo-web-data:
+
+networks:
+  backend:
+    driver: bridge
